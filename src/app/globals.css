@@ -1,0 +1,67 @@
+@import "tailwindcss";
+
+/*
+  ImportDesk design tokens.
+  A calm, low-contrast base for a screen used all day, one ink colour for
+  actions, and three status colours that carry meaning everywhere:
+  amber = needs a person, red = mismatch, green = cleared.
+*/
+@theme {
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, SFMono-Regular, monospace;
+
+  --color-canvas: #f6f6f4;
+  --color-surface: #ffffff;
+  --color-sunken: #f0efec;
+  --color-line: #e5e4e0;
+  --color-line-strong: #d3d2cc;
+
+  --color-ink: #191a1c;
+  --color-ink-soft: #45464a;
+  --color-muted: #7d7e83;
+
+  --color-brand: #1d2b4c;
+  --color-brand-hover: #2a3c66;
+  --color-focus: #3d5ba9;
+
+  --color-review: #a85b06;
+  --color-review-soft: #fdf4e6;
+  --color-review-line: #f2d4a6;
+
+  --color-fail: #b3261e;
+  --color-fail-soft: #fdf0ef;
+  --color-fail-line: #f3c4c0;
+
+  --color-ok: #1c7445;
+  --color-ok-soft: #ecf6f0;
+  --color-ok-line: #bfe0cc;
+
+  --radius-card: 10px;
+}
+
+@layer base {
+  html {
+    color-scheme: light;
+  }
+
+  body {
+    background: var(--color-canvas);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    font-feature-settings: "cv11", "ss01";
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-focus);
+    outline-offset: 2px;
+  }
+
+  ::selection {
+    background: #dbe3f6;
+  }
+}
+
+/* Figures line up in columns. */
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
