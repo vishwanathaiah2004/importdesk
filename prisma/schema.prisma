@@ -1,0 +1,226 @@
+// ImportDesk data model.
+// Design notes live in docs/decisions.md; key ideas:
+// - Every extracted value (header, line item or container) is one ExtractedField
+//   row with its source snippet, confidence and review status.
+// - Quantities and money use Decimal, never Float, so cross-checks are exact.
+// - A missing document produces NOT_CHECKED, never PASS.
+
+generator client {
+  provider   = "prisma-client-js"
+  // Rust-free client: no query-engine binary, uses the pg driver adapter.
+  engineType = "client"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+enum Role {
+  EXECUTIVE
+  MANAGER
+}
+
+enum ShipmentStatus {
+  DRAFT
+  EXTRACTING
+  NEEDS_REVIEW
+  READY_FOR_APPROVAL
+  APPROVED
+  EXPORTED
+}
+
+enum DocumentType {
+  INVOICE
+  PACKING_LIST
+  BILL_OF_LADING
+}
+
+enum DocumentStatus {
+  QUEUED
+  EXTRACTING
+  DONE
+  FAILED
+  UNREADABLE
+}
+
+enum FieldStatus {
+  PENDING
+  CONFIRMED
+  CORRECTED
+  MANUAL
+}
+
+enum CheckResult {
+  PASS
+  FAIL
+  NOT_CHECKED
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  name         String
+  passwordHash String
+  role         Role
+  createdAt    DateTime @default(now())
+
+  shipmentsCreated  Shipment[]        @relation("ShipmentCreatedBy")
+  shipmentsApproved Shipment[]        @relation("ShipmentApprovedBy")
+  fieldsConfirmed   ExtractedField[]  @relation("FieldConfirmedBy")
+  checksResolved    CrossCheck[]      @relation("CheckResolvedBy")
+  corrections       FieldCorrection[] @relation("CorrectionBy")
+  exports           Export[]          @relation("ExportedBy")
+  auditLogs         AuditLog[]
+}
+
+model Supplier {
+  id        String     @id @default(cuid())
+  name      String
+  country   String
+  shipments Shipment[]
+
+  @@unique([name, country])
+}
+
+model Shipment {
+  id        String         @id @default(cuid())
+  code      String         @unique
+  status    ShipmentStatus @default(DRAFT)
+  // Optimistic concurrency: incremented on every review change.
+  version   Int            @default(1)
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+
+  supplierId   String?
+  supplier     Supplier? @relation(fields: [supplierId], references: [id])
+  createdById  String
+  createdBy    User      @relation("ShipmentCreatedBy", fields: [createdById], references: [id])
+  approvedById String?
+  approvedBy   User?     @relation("ShipmentApprovedBy", fields: [approvedById], references: [id])
+  approvedAt   DateTime?
+
+  documents   Document[]
+  crossChecks CrossCheck[]
+  exports     Export[]
+
+  @@index([status])
+}
+
+model Document {
+  id          String         @id @default(cuid())
+  type        DocumentType
+  fileName    String
+  storageKey  String
+  mimeType    String
+  sizeBytes   Int
+  pageCount   Int?
+  status      DocumentStatus @default(QUEUED)
+  error       String?
+  modelName   String?
+  extractedAt DateTime?
+  createdAt   DateTime       @default(now())
+
+  shipmentId String
+  shipment   Shipment @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+
+  blob   DocumentBlob?
+  fields ExtractedField[]
+
+  // Assumption: one document of each type per shipment; re-upload replaces it.
+  @@unique([shipmentId, type])
+}
+
+// The uploaded file itself. Kept in its own table so listing documents never
+// loads file bytes. [A] Prototype stores files in Postgres (Mumbai region);
+// production would move them to private object storage in the same region.
+model DocumentBlob {
+  documentId String   @id
+  document   Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  data       Bytes
+}
+
+model ExtractedField {
+  id              String      @id @default(cuid())
+  // "invoice_number" for header fields, "line.1.quantity" for line items,
+  // "container.1" for containers. Definitions live in src/lib/fields.ts.
+  key             String
+  valueRaw        String?
+  valueNormalized String?
+  unit            String?
+  confidence      Float?
+  sourceSnippet   String?
+  sourcePage      Int?
+  status          FieldStatus @default(PENDING)
+  flagReason      String?
+  confirmedAt     DateTime?
+  updatedAt       DateTime    @updatedAt
+
+  documentId    String
+  document      Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  confirmedById String?
+  confirmedBy   User?    @relation("FieldConfirmedBy", fields: [confirmedById], references: [id])
+
+  corrections FieldCorrection[]
+
+  @@unique([documentId, key])
+}
+
+model CrossCheck {
+  id             String      @id @default(cuid())
+  rule           String
+  result         CheckResult
+  details        Json
+  resolutionNote String?
+  resolvedAt     DateTime?
+  createdAt      DateTime    @default(now())
+
+  shipmentId   String
+  shipment     Shipment @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+  resolvedById String?
+  resolvedBy   User?    @relation("CheckResolvedBy", fields: [resolvedById], references: [id])
+
+  @@unique([shipmentId, rule])
+}
+
+model FieldCorrection {
+  id        String   @id @default(cuid())
+  oldValue  String?
+  newValue  String
+  createdAt DateTime @default(now())
+
+  fieldId String
+  field   ExtractedField @relation(fields: [fieldId], references: [id], onDelete: Cascade)
+  userId  String
+  user    User           @relation("CorrectionBy", fields: [userId], references: [id])
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  action     String
+  entityType String
+  entityId   String
+  metadata   Json?
+  createdAt  DateTime @default(now())
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id])
+
+  @@index([entityType, entityId])
+}
+
+// One row per export, holding the exact file that was produced, so a past
+// export can be downloaded again and audited even if data changes later.
+model Export {
+  id        String   @id @default(cuid())
+  fileName  String
+  content   String
+  rowCount  Int
+  createdAt DateTime @default(now())
+
+  shipmentId   String
+  shipment     Shipment @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+  exportedById String
+  exportedBy   User     @relation("ExportedBy", fields: [exportedById], references: [id])
+}
