@@ -6,7 +6,7 @@ ImportDesk reads the three documents with a vision AI model, shows every value b
 
 | | |
 |---|---|
-| **Live app** | https://YOUR-APP.vercel.app |
+| **Live app** |https://importdesk-five.vercel.app/login  |
 | **Executive login** | `executive@importdesk.demo` · `Demo@1234` |
 | **Manager login** | `manager@importdesk.demo` · `Demo@1234` |
 | **Design document** | Technical Design Document (submitted with this repository) · [decisions log](docs/decisions.md) |
